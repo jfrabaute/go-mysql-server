@@ -95,23 +95,31 @@ func (h *Handler) ComInitDB(c *mysql.Conn, schemaName string) error {
 	return h.sm.SetDB(c, schemaName)
 }
 
+// ComPrepare parses and partially analyzes a prepared statement's plan
 func (h *Handler) ComPrepare(c *mysql.Conn, query string) ([]*query.Field, error) {
 	ctx, err := h.sm.NewContextWithQuery(c, query)
 	if err != nil {
 		return nil, err
 	}
-	schema, err := h.e.AnalyzeQuery(ctx, query)
+	parsed, err := parse.Parse(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	if sql.IsOkResultSchema(schema) {
+
+	analyzed, err := h.e.Analyzer.PrepareQuery(ctx, parsed, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	h.e.CachePreparedStmt(c.ConnectionID, analyzed, query)
+
+	if sql.IsOkResultSchema(analyzed.Schema()) {
 		return nil, nil
 	}
-	return schemaToFields(schema), nil
+	return schemaToFields(analyzed.Schema()), nil
 }
 
 func (h *Handler) ComStmtExecute(c *mysql.Conn, prepare *mysql.PrepareData, callback func(*sqltypes.Result) error) error {
-
 	_, err := h.errorWrappedDoQuery(c, prepare.PrepareStmt, MultiStmtModeOff, prepare.BindVars, func(res *sqltypes.Result, more bool) error {
 		return callback(res)
 	})
@@ -138,6 +146,9 @@ func (h *Handler) ConnectionClosed(c *mysql.Conn) {
 	if err := h.e.Analyzer.Catalog.UnlockTables(ctx, c.ConnectionID); err != nil {
 		logrus.Errorf("unable to unlock tables on session close: %s", err)
 	}
+
+	// cleanup PreparedData
+	h.e.CloseSession(c.ConnectionID)
 
 	logrus.WithField(sqle.ConnectionIdLogField, c.ConnectionID).Infof("ConnectionClosed")
 }
@@ -330,7 +341,7 @@ func (h *Handler) doQuery(
 	oCtx := ctx
 	eg, ctx := ctx.NewErrgroup()
 
-	schema, rows, err := h.e.QueryNodeWithBindings(ctx, query, parsed, sqlBindings)
+	schema, rows, err := h.e.QueryNodeWithBindings(ctx, c.ConnectionID, query, parsed, sqlBindings)
 	if err != nil {
 		ctx.GetLogger().WithError(err).Warn("error running query")
 		return remainder, err

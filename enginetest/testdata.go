@@ -891,7 +891,7 @@ func createNativeIndexes(t *testing.T, harness Harness, e *sqle.Engine) error {
 
 	for _, q := range createIndexes {
 		ctx := NewContext(harness)
-		_, iter, err := e.Query(ctx, q)
+		_, iter, err := e.Query(ctx, 0, q)
 		require.NoError(t, err)
 
 		_, err = sql.RowIterToRows(ctx, iter)

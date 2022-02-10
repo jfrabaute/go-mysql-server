@@ -263,10 +263,7 @@ func TestOrderByGroupBy(t *testing.T, harness Harness) {
 
 	e := sqle.NewDefault(harness.NewDatabaseProvider(db))
 
-	_, iter, err := e.Query(
-		NewContext(harness).WithCurrentDB("db"),
-		"SELECT team, COUNT(*) FROM members GROUP BY team ORDER BY 2",
-	)
+	_, iter, err := e.Query(NewContext(harness).WithCurrentDB("db"), 0, "SELECT team, COUNT(*) FROM members GROUP BY team ORDER BY 2")
 	require.NoError(err)
 
 	ctx := NewContext(harness)
@@ -281,10 +278,7 @@ func TestOrderByGroupBy(t *testing.T, harness Harness) {
 
 	require.Equal(expected, rows)
 
-	_, iter, err = e.Query(
-		NewContext(harness).WithCurrentDB("db"),
-		"SELECT team, COUNT(*) FROM members GROUP BY 1 ORDER BY 2",
-	)
+	_, iter, err = e.Query(NewContext(harness).WithCurrentDB("db"), 0, "SELECT team, COUNT(*) FROM members GROUP BY 1 ORDER BY 2")
 	require.NoError(err)
 
 	rows, err = sql.RowIterToRows(ctx, iter)
@@ -292,10 +286,7 @@ func TestOrderByGroupBy(t *testing.T, harness Harness) {
 
 	require.Equal(expected, rows)
 
-	_, _, err = e.Query(
-		NewContext(harness),
-		"SELECT team, COUNT(*) FROM members GROUP BY team ORDER BY columndoesnotexist",
-	)
+	_, _, err = e.Query(NewContext(harness), 0, "SELECT team, COUNT(*) FROM members GROUP BY team ORDER BY columndoesnotexist")
 	require.Error(err)
 }
 
@@ -433,7 +424,7 @@ func TestColumnAliases(t *testing.T, harness Harness) {
 			defer e.Close()
 
 			ctx := NewContext(harness)
-			sch, rowIter, err := e.Query(ctx, tt.query)
+			sch, rowIter, err := e.Query(ctx, 0, tt.query)
 			var colNames []string
 			for _, col := range sch {
 				colNames = append(colNames, col.Name)
@@ -743,7 +734,7 @@ func TestTruncate(t *testing.T, harness Harness) {
 		RunQuery(t, e, harness, "CREATE TABLE t2parent (pk BIGINT PRIMARY KEY, v1 BIGINT, INDEX (v1))")
 		RunQuery(t, e, harness, "CREATE TABLE t2child (pk BIGINT PRIMARY KEY, v1 BIGINT, "+
 			"FOREIGN KEY (v1) REFERENCES t2parent (v1))")
-		_, _, err := e.Query(ctx, "TRUNCATE t2parent")
+		_, _, err := e.Query(ctx, 0, "TRUNCATE t2parent")
 		require.True(t, sql.ErrTruncateReferencedFromForeignKey.Is(err))
 	})
 
@@ -1317,12 +1308,12 @@ func TestVersionedViews(t *testing.T, harness Harness) {
 	e := NewEngine(t, harness)
 	defer e.Close()
 	ctx := NewContext(harness)
-	_, iter, err := e.Query(ctx, "CREATE VIEW myview1 AS SELECT * FROM myhistorytable")
+	_, iter, err := e.Query(ctx, 0, "CREATE VIEW myview1 AS SELECT * FROM myhistorytable")
 	require.NoError(err)
 	iter.Close(ctx)
 
 	// nested views
-	_, iter, err = e.Query(ctx, "CREATE VIEW myview2 AS SELECT * FROM myview1 WHERE i = 1")
+	_, iter, err = e.Query(ctx, 0, "CREATE VIEW myview2 AS SELECT * FROM myview1 WHERE i = 1")
 	require.NoError(err)
 	iter.Close(ctx)
 
@@ -1433,7 +1424,7 @@ func TestCreateTable(t *testing.T, harness Harness) {
 			"b TEXT NOT NULL,"+
 			"c bool, primary key (a))", []sql.Row(nil), nil, nil)
 
-		_, _, err := e.Query(NewContext(harness), "CREATE TABLE t4(a INTEGER,"+
+		_, _, err := e.Query(NewContext(harness), 0, "CREATE TABLE t4(a INTEGER,"+
 			"b TEXT NOT NULL,"+
 			"c bool, primary key (a))")
 		require.Error(t, err)
@@ -1442,7 +1433,7 @@ func TestCreateTable(t *testing.T, harness Harness) {
 
 	t.Run("With default", func(t *testing.T) {
 		//TODO: NOW(millseconds) must match timestamp(milliseconds), else it's an error
-		_, _, err := e.Query(NewContext(harness), "CREATE TABLE t5(a INTEGER,"+
+		_, _, err := e.Query(NewContext(harness), 0, "CREATE TABLE t5(a INTEGER,"+
 			"`create_time` timestamp(6) NOT NULL DEFAULT NOW(6),"+
 			"primary key (a))")
 		require.NoError(t, err)
@@ -1475,7 +1466,7 @@ func TestCreateTable(t *testing.T, harness Harness) {
 	})
 
 	t.Run("CREATE LIKE with indexes, default, and comments", func(t *testing.T) {
-		_, iter, err := e.Query(ctx, "CREATE TABLE t7pre("+
+		_, iter, err := e.Query(ctx, 0, "CREATE TABLE t7pre("+
 			"pk bigint primary key,"+
 			"v1 bigint default (2) comment 'hi there',"+
 			"index idx_v1 (v1) comment 'index here'"+
@@ -1519,7 +1510,7 @@ func TestCreateTable(t *testing.T, harness Harness) {
 
 	t.Run("CREATE LIKE table in other database", func(t *testing.T) {
 		ctx.SetCurrentDatabase("foo")
-		_, iter, err := e.Query(ctx, "CREATE TABLE t8pre("+
+		_, iter, err := e.Query(ctx, 0, "CREATE TABLE t8pre("+
 			"pk bigint primary key,"+
 			"v1 bigint default (7) comment 'greetings'"+
 			")")
@@ -1686,7 +1677,7 @@ func TestDropTable(t *testing.T, harness Harness) {
 	require.NoError(err)
 	require.False(ok)
 
-	_, _, err = e.Query(NewContext(harness), "DROP TABLE not_exist")
+	_, _, err = e.Query(NewContext(harness), 0, "DROP TABLE not_exist")
 	require.Error(err)
 
 	t.Run("no database selected", func(t *testing.T) {
@@ -1749,11 +1740,11 @@ func TestRenameTable(t *testing.T, harness Harness) {
 	require.NoError(err)
 	require.True(ok)
 
-	_, _, err = e.Query(NewContext(harness), "ALTER TABLE not_exist RENAME foo")
+	_, _, err = e.Query(NewContext(harness), 0, "ALTER TABLE not_exist RENAME foo")
 	require.Error(err)
 	require.True(sql.ErrTableNotFound.Is(err))
 
-	_, _, err = e.Query(NewContext(harness), "ALTER TABLE emptytable RENAME niltable")
+	_, _, err = e.Query(NewContext(harness), 0, "ALTER TABLE emptytable RENAME niltable")
 	require.Error(err)
 	require.True(sql.ErrTableAlreadyExists.Is(err))
 
@@ -1772,7 +1763,7 @@ func TestRenameTable(t *testing.T, harness Harness) {
 		require.NoError(err)
 		require.True(ok)
 
-		_, _, err = e.Query(NewContext(harness), "RENAME TABLE mydb.emptytable2 TO emptytable3")
+		_, _, err = e.Query(NewContext(harness), 0, "RENAME TABLE mydb.emptytable2 TO emptytable3")
 		require.Error(err)
 		require.True(sql.ErrNoDatabaseSelected.Is(err))
 	})
@@ -1946,15 +1937,15 @@ func TestAddColumn(t *testing.T, harness Harness) {
 		{Name: "s5", Type: sql.MustCreateStringWithDefaults(sqltypes.VarChar, 27), Source: "mytable", Nullable: true},
 	}, tbl.Schema())
 
-	_, _, err = e.Query(NewContext(harness), "ALTER TABLE not_exist ADD COLUMN i2 INT COMMENT 'hello'")
+	_, _, err = e.Query(NewContext(harness), 0, "ALTER TABLE not_exist ADD COLUMN i2 INT COMMENT 'hello'")
 	require.Error(err)
 	require.True(sql.ErrTableNotFound.Is(err))
 
-	_, _, err = e.Query(NewContext(harness), "ALTER TABLE mytable ADD COLUMN b BIGINT COMMENT 'ok' AFTER not_exist")
+	_, _, err = e.Query(NewContext(harness), 0, "ALTER TABLE mytable ADD COLUMN b BIGINT COMMENT 'ok' AFTER not_exist")
 	require.Error(err)
 	require.True(sql.ErrTableColumnNotFound.Is(err))
 
-	_, _, err = e.Query(NewContext(harness), "ALTER TABLE mytable ADD COLUMN b INT NOT NULL DEFAULT 'yes'")
+	_, _, err = e.Query(NewContext(harness), 0, "ALTER TABLE mytable ADD COLUMN b INT NOT NULL DEFAULT 'yes'")
 	require.Error(err)
 	require.True(sql.ErrIncompatibleDefaultType.Is(err))
 
@@ -2088,11 +2079,11 @@ func TestDropColumn(t *testing.T, harness Harness) {
 		{Name: "i", Type: sql.Int64, Source: "mytable", PrimaryKey: true},
 	}, tbl.Schema())
 
-	_, _, err = e.Query(NewContext(harness), "ALTER TABLE not_exist DROP COLUMN s")
+	_, _, err = e.Query(NewContext(harness), 0, "ALTER TABLE not_exist DROP COLUMN s")
 	require.Error(err)
 	require.True(sql.ErrTableNotFound.Is(err))
 
-	_, _, err = e.Query(NewContext(harness), "ALTER TABLE mytable DROP COLUMN s")
+	_, _, err = e.Query(NewContext(harness), 0, "ALTER TABLE mytable DROP COLUMN s")
 	require.Error(err)
 	require.True(sql.ErrTableColumnNotFound.Is(err))
 
@@ -2375,7 +2366,7 @@ func TestDropDatabase(t *testing.T, harness Harness) {
 
 		TestQueryWithContext(t, ctx, e, "DROP DATABASE IF EXISTS testdb", []sql.Row{{sql.OkResult{RowsAffected: 1}}}, nil, nil)
 
-		_, iter, err := e.Query(ctx, "USE testdb")
+		_, iter, err := e.Query(ctx, 0, "USE testdb")
 		if err == nil {
 			_, err = sql.RowIterToRows(ctx, iter)
 		}
@@ -2468,18 +2459,18 @@ func TestCreateForeignKeys(t *testing.T, harness Harness) {
 	assert.Equal(t, expected, fks)
 
 	// Some faulty create statements
-	_, _, err = e.Query(NewContext(harness), "ALTER TABLE child2 ADD CONSTRAINT fk3 FOREIGN KEY (f) REFERENCES dne(d) ON UPDATE SET NULL")
+	_, _, err = e.Query(NewContext(harness), 0, "ALTER TABLE child2 ADD CONSTRAINT fk3 FOREIGN KEY (f) REFERENCES dne(d) ON UPDATE SET NULL")
 	require.Error(err)
 
-	_, _, err = e.Query(NewContext(harness), "ALTER TABLE child2 ADD CONSTRAINT fk4 FOREIGN KEY (f) REFERENCES dne(d) ON UPDATE SET NULL")
-	require.Error(err)
-	assert.True(t, sql.ErrTableNotFound.Is(err))
-
-	_, _, err = e.Query(NewContext(harness), "ALTER TABLE dne ADD CONSTRAINT fk4 FOREIGN KEY (f) REFERENCES child(d) ON UPDATE SET NULL")
+	_, _, err = e.Query(NewContext(harness), 0, "ALTER TABLE child2 ADD CONSTRAINT fk4 FOREIGN KEY (f) REFERENCES dne(d) ON UPDATE SET NULL")
 	require.Error(err)
 	assert.True(t, sql.ErrTableNotFound.Is(err))
 
-	_, _, err = e.Query(NewContext(harness), "ALTER TABLE child2 ADD CONSTRAINT fk4 FOREIGN KEY (f) REFERENCES child(dne) ON UPDATE SET NULL")
+	_, _, err = e.Query(NewContext(harness), 0, "ALTER TABLE dne ADD CONSTRAINT fk4 FOREIGN KEY (f) REFERENCES child(d) ON UPDATE SET NULL")
+	require.Error(err)
+	assert.True(t, sql.ErrTableNotFound.Is(err))
+
+	_, _, err = e.Query(NewContext(harness), 0, "ALTER TABLE child2 ADD CONSTRAINT fk4 FOREIGN KEY (f) REFERENCES child(dne) ON UPDATE SET NULL")
 	require.Error(err)
 	assert.True(t, sql.ErrTableColumnNotFound.Is(err))
 
@@ -3656,22 +3647,22 @@ func TestClearWarnings(t *testing.T, harness Harness) {
 	defer e.Close()
 	ctx := NewContext(harness)
 
-	_, iter, err := e.Query(ctx, "-- some empty query as a comment")
+	_, iter, err := e.Query(ctx, 0, "-- some empty query as a comment")
 	require.NoError(err)
 	err = iter.Close(ctx)
 	require.NoError(err)
 
-	_, iter, err = e.Query(ctx, "-- some empty query as a comment")
+	_, iter, err = e.Query(ctx, 0, "-- some empty query as a comment")
 	require.NoError(err)
 	err = iter.Close(ctx)
 	require.NoError(err)
 
-	_, iter, err = e.Query(ctx, "-- some empty query as a comment")
+	_, iter, err = e.Query(ctx, 0, "-- some empty query as a comment")
 	require.NoError(err)
 	err = iter.Close(ctx)
 	require.NoError(err)
 
-	_, iter, err = e.Query(ctx, "SHOW WARNINGS")
+	_, iter, err = e.Query(ctx, 0, "SHOW WARNINGS")
 	require.NoError(err)
 	rows, err := sql.RowIterToRows(ctx, iter)
 	require.NoError(err)
@@ -3679,7 +3670,7 @@ func TestClearWarnings(t *testing.T, harness Harness) {
 	require.NoError(err)
 	require.Equal(3, len(rows))
 
-	_, iter, err = e.Query(ctx, "SHOW WARNINGS LIMIT 1")
+	_, iter, err = e.Query(ctx, 0, "SHOW WARNINGS LIMIT 1")
 	require.NoError(err)
 	rows, err = sql.RowIterToRows(ctx, iter)
 	require.NoError(err)
@@ -3687,7 +3678,7 @@ func TestClearWarnings(t *testing.T, harness Harness) {
 	require.NoError(err)
 	require.Equal(1, len(rows))
 
-	_, _, err = e.Query(ctx, "SELECT * FROM mytable LIMIT 1")
+	_, _, err = e.Query(ctx, 0, "SELECT * FROM mytable LIMIT 1")
 	require.NoError(err)
 	_, err = sql.RowIterToRows(ctx, iter)
 	require.NoError(err)
@@ -3705,12 +3696,12 @@ func TestUse(t *testing.T, harness Harness) {
 	ctx := NewContext(harness)
 	require.Equal("mydb", ctx.GetCurrentDatabase())
 
-	_, _, err := e.Query(ctx, "USE bar")
+	_, _, err := e.Query(ctx, 0, "USE bar")
 	require.Error(err)
 
 	require.Equal("mydb", ctx.GetCurrentDatabase())
 
-	_, iter, err := e.Query(ctx, "USE foo")
+	_, iter, err := e.Query(ctx, 0, "USE foo")
 	require.NoError(err)
 
 	rows, err := sql.RowIterToRows(ctx, iter)
@@ -3777,7 +3768,7 @@ func TestTracing(t *testing.T, harness Harness) {
 
 	ctx := sql.NewContext(context.Background(), sql.WithTracer(tracer)).WithCurrentDB("mydb")
 
-	_, iter, err := e.Query(ctx, `SELECT DISTINCT i
+	_, iter, err := e.Query(ctx, 0, `SELECT DISTINCT i
 		FROM mytable
 		WHERE s = 'first row'
 		ORDER BY i DESC
@@ -3855,7 +3846,7 @@ func TestCurrentTimestamp(t *testing.T, harness Harness) {
 				//TestQueryWithContext(t, ctx, e, tt.Query, tt.Expected, nil, nil)
 				if tt.err {
 					require := require.New(t)
-					_, iter, err := e.Query(ctx, tt.Query)
+					_, iter, err := e.Query(ctx, 0, tt.Query)
 					_, err = sql.RowIterToRows(ctx, iter)
 					require.Error(err)
 				} else {
@@ -4022,7 +4013,7 @@ func TestAddDropPks(t *testing.T, harness Harness) {
 // RunQuery runs the query given and asserts that it doesn't result in an error.
 func RunQuery(t *testing.T, e *sqle.Engine, harness Harness, query string) {
 	ctx := NewContext(harness)
-	_, iter, err := e.Query(ctx, query)
+	_, iter, err := e.Query(ctx, 0, query)
 	require.NoError(t, err)
 	_, err = sql.RowIterToRows(ctx, iter)
 	require.NoError(t, err)
@@ -4030,7 +4021,7 @@ func RunQuery(t *testing.T, e *sqle.Engine, harness Harness, query string) {
 
 // RunQueryWithContext runs the query given and asserts that it doesn't result in an error.
 func RunQueryWithContext(t *testing.T, e *sqle.Engine, ctx *sql.Context, query string) {
-	_, iter, err := e.Query(ctx, query)
+	_, iter, err := e.Query(ctx, 0, query)
 	require.NoError(t, err)
 	_, err = sql.RowIterToRows(ctx, iter)
 	require.NoError(t, err)
@@ -4045,7 +4036,7 @@ func AssertErr(t *testing.T, e *sqle.Engine, harness Harness, query string, expe
 // type of error.
 func AssertErrWithBindings(t *testing.T, e *sqle.Engine, harness Harness, query string, bindings map[string]sql.Expression, expectedErrKind *errors.Kind, errStrs ...string) {
 	ctx := NewContext(harness)
-	_, iter, err := e.QueryWithBindings(ctx, query, bindings)
+	_, iter, err := e.QueryWithBindings(ctx, 0, query, bindings)
 	if err == nil {
 		_, err = sql.RowIterToRows(ctx, iter)
 	}
@@ -4060,7 +4051,7 @@ func AssertErrWithBindings(t *testing.T, e *sqle.Engine, harness Harness, query 
 
 // AssertErrWithCtx is the same as AssertErr, but uses the context given instead of creating one from a harness
 func AssertErrWithCtx(t *testing.T, e *sqle.Engine, ctx *sql.Context, query string, expectedErrKind *errors.Kind, errStrs ...string) {
-	_, iter, err := e.Query(ctx, query)
+	_, iter, err := e.Query(ctx, 0, query)
 	if err == nil {
 		_, err = sql.RowIterToRows(ctx, iter)
 	}
@@ -4091,7 +4082,7 @@ func AssertWarningAndTestQuery(
 	if ctx == nil {
 		ctx = NewContext(harness)
 	}
-	sch, iter, err := e.Query(ctx, query)
+	sch, iter, err := e.Query(ctx, 0, query)
 	require.NoError(err, "Unexpected error for query %s", query)
 
 	rows, err := sql.RowIterToRows(ctx, iter)
@@ -4778,7 +4769,7 @@ func TestQuery(t *testing.T, harness Harness, e *sqle.Engine, q string, expected
 
 func TestQueryWithContext(t *testing.T, ctx *sql.Context, e *sqle.Engine, q string, expected []sql.Row, expectedCols []*sql.Column, bindings map[string]sql.Expression) {
 	require := require.New(t)
-	sch, iter, err := e.QueryWithBindings(ctx, q, bindings)
+	sch, iter, err := e.QueryWithBindings(ctx, 0, q, bindings)
 	require.NoError(err, "Unexpected error for query %s", q)
 
 	rows, err := sql.RowIterToRows(ctx, iter)

@@ -56,11 +56,17 @@ type Engine struct {
 	MemoryManager     *sql.MemoryManager
 	BackgroundThreads *sql.BackgroundThreads
 	IsReadOnly        bool
+	PreparedData      map[uint32]PreparedData
 }
 
 type ColumnWithRawDefault struct {
 	SqlColumn *sql.Column
 	Default   string
+}
+
+type PreparedData struct {
+	Node  sql.Node
+	Query string
 }
 
 // New creates a new Engine with custom configuration. To create an Engine with
@@ -96,6 +102,7 @@ func New(a *analyzer.Analyzer, cfg *Config) *Engine {
 		LS:                ls,
 		BackgroundThreads: sql.NewBackgroundThreads(),
 		IsReadOnly:        isReadOnly,
+		PreparedData:      make(map[uint32]PreparedData),
 	}
 }
 
@@ -109,38 +116,34 @@ func NewDefault(pro sql.DatabaseProvider) *Engine {
 func (e *Engine) AnalyzeQuery(
 	ctx *sql.Context,
 	query string,
-) (sql.Schema, error) {
+) (sql.Node, error) {
 	parsed, err := parse.Parse(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-
-	analyzed, err := e.Analyzer.Analyze(ctx, parsed, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return analyzed.Schema(), nil
+	return e.Analyzer.Analyze(ctx, parsed, nil)
 }
 
 // Query executes a query. If parsed is non-nil, it will be used instead of parsing the query from text.
-func (e *Engine) Query(ctx *sql.Context, query string) (sql.Schema, sql.RowIter, error) {
-	return e.QueryWithBindings(ctx, query, nil)
+func (e *Engine) Query(ctx *sql.Context, connId uint32, query string) (sql.Schema, sql.RowIter, error) {
+	return e.QueryWithBindings(ctx, connId, query, nil)
 }
 
 // QueryWithBindings executes the query given with the bindings provided
 func (e *Engine) QueryWithBindings(
 	ctx *sql.Context,
+	connId uint32,
 	query string,
 	bindings map[string]sql.Expression,
 ) (sql.Schema, sql.RowIter, error) {
-	return e.QueryNodeWithBindings(ctx, query, nil, bindings)
+	return e.QueryNodeWithBindings(ctx, connId, query, nil, bindings)
 }
 
 // QueryNodeWithBindings executes the query given with the bindings provided. If parsed is non-nil, it will be used
 // instead of parsing the query from text.
 func (e *Engine) QueryNodeWithBindings(
 	ctx *sql.Context,
+	connId uint32,
 	query string,
 	parsed sql.Node,
 	bindings map[string]sql.Expression,
@@ -168,16 +171,39 @@ func (e *Engine) QueryNodeWithBindings(
 		return nil, nil, err
 	}
 
-	if len(bindings) > 0 {
-		parsed, err = plan.ApplyBindings(ctx, parsed, bindings)
+	// prepared statement, short circuit optimizer
+	if query == e.PreparedData[connId].Query && e.PreparedData[connId].Node != nil {
+		ctx.GetLogger().Tracef("optimizing prepared plan for query: %s", query)
+
+		analyzed = e.PreparedData[connId].Node
+		analyzed, err = analyzer.DeepCopyNode(analyzed)
+
+		if len(bindings) > 0 {
+			analyzed, err = plan.ApplyBindings(ctx, analyzed, bindings)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		ctx.GetLogger().Tracef("plan before re-opt: %s", analyzed.String())
+
+		analyzed, err = e.Analyzer.AnalyzePrepared(ctx, analyzed, nil)
 		if err != nil {
 			return nil, nil, err
 		}
-	}
 
-	analyzed, err = e.Analyzer.Analyze(ctx, parsed, nil)
-	if err != nil {
-		return nil, nil, err
+		ctx.GetLogger().Tracef("plan after re-opt: %s", analyzed.String())
+	} else {
+		if len(bindings) > 0 {
+			parsed, err = plan.ApplyBindings(ctx, parsed, bindings)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+
+		analyzed, err = e.Analyzer.Analyze(ctx, parsed, nil)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	iter, err = analyzed.RowIter(ctx, nil)
@@ -195,6 +221,17 @@ func (e *Engine) QueryNodeWithBindings(
 	}
 
 	return analyzed.Schema(), iter, nil
+}
+
+func (e *Engine) CachePreparedStmt(connId uint32, analyzed sql.Node, query string) {
+	e.PreparedData[connId] = PreparedData{
+		Query: query,
+		Node:  analyzed,
+	}
+}
+
+func (e *Engine) CloseSession(connId uint32) {
+	delete(e.PreparedData, connId)
 }
 
 const (

@@ -324,3 +324,61 @@ func TestReorderProjectionUnresolvedChild(t *testing.T) {
 	require.NoError(err)
 	require.True(result.Resolved())
 }
+
+func TestDeppCopyNode(t *testing.T) {
+	node := plan.NewProject(
+		[]sql.Expression{
+			expression.NewStar(),
+		},
+		plan.NewNaturalJoin(
+			plan.NewInnerJoin(
+				plan.NewUnresolvedTable("mytable", ""),
+				plan.NewUnresolvedTable("mytable2", ""),
+				expression.NewEquals(
+					expression.NewUnresolvedQualifiedColumn("mytable", "i"),
+					expression.NewUnresolvedQualifiedColumn("mytable2", "i2"),
+				),
+			),
+			plan.NewUnresolvedTable("mytable3", ""),
+		),
+	)
+
+	new, err := DeepCopyNode(node)
+	require.NoError(t, err)
+
+	new, _ = plan.TransformUp(new, func(node sql.Node) (sql.Node, error) {
+		switch n := node.(type) {
+		case *plan.Project:
+			newExpr, _ := expression.TransformUp(n.Projections[0], func(expr sql.Expression) (sql.Expression, error) {
+				switch expr.(type) {
+				case *expression.Star:
+					return expression.NewUnresolvedQualifiedColumn("mytable3", "i"), nil
+				}
+				return expr, nil
+			})
+			return plan.NewProject([]sql.Expression{newExpr}, n.Child), nil
+		case *plan.InnerJoin:
+			return plan.NewInnerJoin(n.Left(), n.Right(), n.Cond), nil
+		}
+		return node, nil
+	})
+
+	require.NotEqual(t, new, node)
+
+	require.Equal(t, plan.NewProject(
+		[]sql.Expression{
+			expression.NewStar(),
+		},
+		plan.NewNaturalJoin(
+			plan.NewInnerJoin(
+				plan.NewUnresolvedTable("mytable", ""),
+				plan.NewUnresolvedTable("mytable2", ""),
+				expression.NewEquals(
+					expression.NewUnresolvedQualifiedColumn("mytable", "i"),
+					expression.NewUnresolvedQualifiedColumn("mytable2", "i2"),
+				),
+			),
+			plan.NewUnresolvedTable("mytable3", ""),
+		),
+	), node)
+}

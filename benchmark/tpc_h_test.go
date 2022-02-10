@@ -73,7 +73,7 @@ func executeQueries(b *testing.B, e *sqle.Engine) error {
 					b.Fatal(err)
 				}
 
-				_, iter, err := e.Query(ctx, string(query))
+				_, iter, err := e.Query(ctx, 0, string(query))
 				if err != nil {
 					b.Fatal(err)
 				}
